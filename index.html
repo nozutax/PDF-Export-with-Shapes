@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>配置図作成アプリ</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f0f0; }
+        .toolbar { margin: 10px; padding: 10px; background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        /* 125mm x 115mm を pxに変換 (96dpi換算: 1mm ≒ 3.78px) */
+        canvas { border: 1px solid #ccc; background-color: #fff; }
+        .canvas-container { box-shadow: 0 0 10px rgba(0,0,0,0.2); }
+        button { cursor: pointer; padding: 5px 10px; }
+        .active { background-color: #add8e6; }
+    </style>
+</head>
+<body>
+
+<div class="toolbar">
+    <button onclick="addRect()">四角形</button>
+    <button onclick="addLine()">直線</button>
+    <button onclick="addArrow()">矢印</button>
+    <button onclick="addText()">テキスト</button>
+    | 
+    <button onclick="setColor('black')">黒</button>
+    <button onclick="setColor('red')" style="color:red">赤</button>
+    |
+    <button onclick="applyHatch()">網掛け(選択中図形)</button>
+    |
+    <button onclick="exportPDF()" style="background-color: #4CAF50; color: white;">PDF出力</button>
+</div>
+
+<!-- 125mm x 115mm の描画領域 -->
+<canvas id="canvas" width="472" height="434"></canvas>
+
+<script>
+    const canvas = new fabric.Canvas('canvas');
+    let currentColor = 'black';
+
+    // 1. 図形追加機能
+    function addRect() {
+        const rect = new fabric.Rect({
+            left: 50, top: 50, fill: 'transparent', 
+            stroke: currentColor, strokeWidth: 2, width: 100, height: 80 
+        });
+        canvas.add(rect);
+    }
+
+    function addText() {
+        const text = new fabric.IText('テキスト入力', {
+            left: 50, top: 50, fontSize: 16, fill: currentColor
+        });
+        canvas.add(text);
+    }
+
+    function addLine() {
+        const line = new fabric.Line([50, 50, 150, 50], {
+            stroke: currentColor, strokeWidth: 2
+        });
+        canvas.add(line);
+    }
+
+    function addArrow() {
+        // 簡易的な矢印（Fabric.jsではカスタムが必要）
+        const line = new fabric.Line([50, 50, 150, 50], { stroke: currentColor, strokeWidth: 2 });
+        const triangle = new fabric.Triangle({
+            width: 10, height: 15, fill: currentColor, 
+            left: 150, top: 50, angle: 90, originX: 'center', originY: 'center'
+        });
+        const group = new fabric.Group([line, triangle], { left: 50, top: 50 });
+        canvas.add(group);
+    }
+
+    // 2. 色設定
+    function setColor(color) {
+        currentColor = color;
+        const activeObject = canvas.getActiveObject();
+        if (activeObject) {
+            if (activeObject.set) {
+                activeObject.set('stroke', color);
+                if (activeObject.type === 'i-text') activeObject.set('fill', color);
+                canvas.renderAll();
+            }
+        }
+    }
+
+    // 3. 網掛け（パターンの適用）
+    function applyHatch() {
+        const activeObject = canvas.getActiveObject();
+        if (!activeObject) return;
+
+        // 斜線パターンの作成
+        const patternCanvas = document.createElement('canvas');
+        patternCanvas.width = patternCanvas.height = 10;
+        const pCtx = patternCanvas.getContext('2d');
+        pCtx.strokeStyle = currentColor;
+        pCtx.lineWidth = 1;
+        pCtx.beginPath();
+        pCtx.moveTo(0, 10); pCtx.lineTo(10, 0);
+        pCtx.stroke();
+
+        const pattern = new fabric.Pattern({
+            source: patternCanvas,
+            repeat: 'repeat'
+        });
+
+        activeObject.set('fill', pattern);
+        canvas.renderAll();
+    }
+
+    // 4. PDF出力 (pdf-libを使用)
+    async function exportPDF() {
+        const { PDFDocument, rgb } = PDFLib;
+        
+        // テンプレートPDFの読み込み（ここでは新規作成しますが、実際は既存PDFをfetch）
+        // const existingPdfBytes = await fetch('template.pdf').then(res => res.arrayBuffer());
+        // const pdfDoc = await PDFDocument.load(existingPdfBytes);
+        const pdfDoc = await PDFDocument.create();
+        const page = pdfDoc.addPage([595.28, 841.89]); // A4サイズ (pts)
+
+        // キャンバスを画像化
+        const dataUrl = canvas.toDataURL({ format: 'png', multiplier: 2 });
+        const image = await pdfDoc.embedPng(dataUrl);
+
+        // 配置図の枠内に出力するための座標計算
+        // A4: 210mm x 297mm (1mm = 2.834pts)
+        // ターゲット: 125mm x 115mm
+        const widthPts = 125 * 2.834;
+        const heightPts = 115 * 2.834;
+
+        /* 
+           PDF内の配置位置（座標は左下が0,0）
+           「配置図記載欄」の正確な位置に合わせて調整が必要です。
+           例：右側にある場合、x=80mm(226pts), y=50mm(141pts) 程度
+        */
+        page.drawImage(image, {
+            x: 310, // 右側のボックスに合わせるための概算値
+            y: 350, // 上部の位置に合わせるための概算値
+            width: widthPts,
+            height: heightPts,
+        });
+
+        const pdfBytes = await pdfDoc.save();
+        
+        // ダウンロード処理
+        const blob = new Blob([pdfBytes], { type: "application/pdf" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "保管場所配置図.pdf";
+        link.click();
+    }
+</script>
+
+</body>
+</html>
