@@ -2,64 +2,76 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>配置図・PDF合成ツール</title>
-    <!-- ライブラリの読み込み -->
+    <title>配置図PDF作成ツール</title>
+    <!-- ライブラリ読み込み -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
     <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
     <style>
-        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #e0e0e0; margin: 0; padding: 20px; }
-        .toolbar { background: #fff; padding: 15px; margin-bottom: 10px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; max-width: 1000px; }
-        .group { display: flex; align-items: center; gap: 5px; border-right: 1px solid #ccc; padding-right: 10px; margin-right: 5px; }
-        #canvas-container { position: relative; border: 1px solid #999; background: white; overflow: auto; cursor: crosshair; }
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; align-items: center; background: #f4f7f6; margin: 0; padding: 20px; }
+        .toolbar { background: #fff; padding: 15px; margin-bottom: 15px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; max-width: 1100px; border: 1px solid #ddd; }
+        .group { display: flex; align-items: center; gap: 8px; border-right: 1px solid #eee; padding-right: 12px; margin-right: 5px; }
+        .group:last-child { border-right: none; }
+        #canvas-container { position: relative; border: 2px solid #ccc; background: white; overflow: auto; cursor: crosshair; box-shadow: 0 0 20px rgba(0,0,0,0.1); }
         canvas { position: absolute; top: 0; left: 0; }
         #bg-canvas { z-index: 1; }
         #draw-canvas { z-index: 2; }
-        button { padding: 8px 12px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; font-size: 13px; }
+        button { padding: 10px 15px; cursor: pointer; border: 1px solid #ddd; background: #fff; border-radius: 6px; font-size: 14px; transition: 0.2s; }
+        button:hover { background: #f9f9f9; border-color: #bbb; }
         button.active { background: #007bff; color: white; border-color: #0056b3; }
-        .color-btn { width: 25px; height: 25px; border-radius: 50%; border: 2px solid #fff; cursor: pointer; }
-        .color-btn.active { outline: 2px solid #007bff; }
-        .pdf-section { background: #fff; padding: 15px; border-radius: 8px; margin-top: 10px; border: 2px solid #28a745; width: 800px; }
-        .hint { font-size: 12px; color: #444; margin-top: 10px; }
+        .color-btn { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; cursor: pointer; box-shadow: 0 0 4px rgba(0,0,0,0.2); }
+        .color-btn.active { outline: 3px solid #007bff; }
+        .download-btn { background: #28a745 !important; color: white !important; font-weight: bold; border: none !important; padding: 10px 25px !important; margin-left: auto; }
+        .download-btn:hover { background: #218838 !important; }
+        .hint { font-size: 13px; color: #666; margin-top: 15px; text-align: center; line-height: 1.6; }
+        kbd { background: #eee; border: 1px solid #ccc; padding: 2px 5px; border-radius: 3px; font-family: monospace; }
     </style>
 </head>
 <body>
 
+    <h2 style="margin-top: 0; color: #333;">配置図・清書アプリ</h2>
+
     <div class="toolbar">
         <div class="group">
-            <strong>1. 下書き読み込み:</strong>
-            <input type="file" id="fileLoader" accept="image/*,application/pdf" style="width: 150px;">
-            <button onclick="rotateUnderlay()">回転 ↻</button>
+            <strong>1. 下書きを選択:</strong>
+            <input type="file" id="fileLoader" accept="image/*,application/pdf" style="width: 160px;">
+            <button onclick="rotateUnderlay()" title="90度回転">回転 ↻</button>
         </div>
+
         <div class="group">
             <button class="color-btn active" id="col-black" style="background: #000;" onclick="setColor('#000000')"></button>
             <button class="color-btn" id="col-red" style="background: #ff0000;" onclick="setColor('#ff0000')"></button>
         </div>
+
         <div class="group">
             <button onclick="setTool('rect')" id="tool-rect" class="active">長方形</button>
             <button onclick="setTool('line')" id="tool-line">直線</button>
-            <button onclick="setTool('dist')" id="tool-dist" style="color:red;">距離(矢印)</button>
+            <button onclick="setTool('dist')" id="tool-dist" style="color:red; font-weight:bold;">距離(矢印)</button>
             <button onclick="setTool('text')" id="tool-text">文字</button>
         </div>
-        <button onclick="undo()">1つ戻す</button>
-        <button onclick="clearCanvas()" style="color:red;">全消去</button>
+
+        <div class="group">
+            <button onclick="undo()">戻す</button>
+            <button onclick="clearCanvas()" style="color:#d9534f;">全消去</button>
+        </div>
+
+        <button onclick="generateFinalPDF()" class="download-btn">完成PDFをダウンロード</button>
     </div>
 
     <div id="canvas-container">
-        <canvas id="bg-canvas" width="800" height="400"></canvas>
-        <canvas id="draw-canvas" width="800" height="400"></canvas>
+        <canvas id="bg-canvas" width="800" height="500"></canvas>
+        <canvas id="draw-canvas" width="800" height="500"></canvas>
     </div>
 
-    <div class="pdf-section">
-        <strong>2. テンプレートPDFへ書き出し:</strong><br>
-        <div style="margin-top:10px; display:flex; gap:20px; align-items: center;">
-            <input type="file" id="templateLoader" accept="application/pdf">
-            <button onclick="generateFinalPDF()" style="background:#28a745; color:white; font-weight:bold; padding: 10px 20px;">完成PDFをダウンロード</button>
-        </div>
-        <div class="hint">※「配置図記載欄」（右側の枠）に自動的に貼り付けられます。</div>
+    <div class="hint">
+        <strong>操作方法:</strong><br>
+        ・<kbd>Shift</kbd>キーを押しながら描画で垂直・水平固定 / グリッド10pxスナップ有効<br>
+        ・「距離(矢印)」ツール：描画後に数字を入力すると自動で「〇〇m」と表示されます。<br>
+        ・完成PDFはGitHub上のテンプレートPDFの右側「配置図記載欄」に自動合成されます。
     </div>
 
     <script>
-        // PDF.js & pdf-lib の初期設定
+        const TEMPLATE_URL = 'https://nozutax.github.io/PDF-Export-with-Shapes/shozaizu-haichizu.pdf';
+        
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
         const { PDFDocument, rgb } = PDFLib;
 
@@ -71,16 +83,17 @@
         
         let currentTool = 'rect', currentColor = '#000000', drawing = false;
         let startX, startY, shapes = [], bgImage = null, bgRotation = 0, isShiftDown = false;
-        let templatePdfBytes = null;
 
-        // キー判定
+        // キー操作
         window.addEventListener('keydown', (e) => { if(e.key === 'Shift') isShiftDown = true; });
         window.addEventListener('keyup', (e) => { if(e.key === 'Shift') isShiftDown = false; });
 
-        // 1. 下書きの読み込み
+        // 下書き読み込み
         document.getElementById('fileLoader').addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (!file) return;
+            bgRotation = 0;
+
             if (file.type === "application/pdf") {
                 const arrayBuffer = await file.arrayBuffer();
                 const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
@@ -98,16 +111,11 @@
             }
         });
 
-        // 2. テンプレートPDFの読み込み
-        document.getElementById('templateLoader').addEventListener('change', async (e) => {
-            templatePdfBytes = await e.target.files[0].arrayBuffer();
-            alert("テンプレートを読み込みました。");
-        });
-
         function updateSize(w, h) {
             if (bgRotation % 180 === 0) { bgCanvas.width = drawCanvas.width = w; bgCanvas.height = drawCanvas.height = h; }
             else { bgCanvas.width = drawCanvas.width = h; bgCanvas.height = drawCanvas.height = w; }
-            container.style.width = bgCanvas.width + "px"; container.style.height = bgCanvas.height + "px";
+            container.style.width = bgCanvas.width + "px";
+            container.style.height = (bgCanvas.height > 600 ? 600 : bgCanvas.height) + "px"; // スクロール対応
             renderBg(); redraw();
         }
 
@@ -122,17 +130,20 @@
             bgCtx.restore();
         }
 
-        // 描画ロジック (簡略版 - 前回と同様)
-        function setTool(t) { currentTool = t; document.querySelectorAll('.group button').forEach(b => b.classList.remove('active')); document.getElementById('tool-'+t).classList.add('active'); }
+        function setTool(t) { currentTool = t; document.querySelectorAll('.group button').forEach(b => b.classList.remove('active')); document.getElementById('tool-'+t).classList.add('active'); if(t==='dist') setColor('#ff0000'); }
         function setColor(c) { currentColor = c; document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active')); (c==='#000000'?document.getElementById('col-black'):document.getElementById('col-red')).classList.add('active'); }
 
-        drawCanvas.addEventListener('mousedown', (e) => {
+        function getPos(e) {
             const rect = drawCanvas.getBoundingClientRect();
-            startX = Math.round((e.clientX - rect.left) / 10) * 10;
-            startY = Math.round((e.clientY - rect.top) / 10) * 10;
-            drawing = true;
+            let x = (e.clientX - rect.left) * (drawCanvas.width / rect.width);
+            let y = (e.clientY - rect.top) * (drawCanvas.height / rect.height);
+            return { x: Math.round(x/10)*10, y: Math.round(y/10)*10 };
+        }
+
+        drawCanvas.addEventListener('mousedown', (e) => {
+            const p = getPos(e); startX = p.x; startY = p.y; drawing = true;
             if(currentTool==='text'){
-                const txt = prompt("文字入力:");
+                const txt = prompt("入力する文字:");
                 if(txt) { shapes.push({type:'text', x:startX, y:startY, text:txt, color:currentColor}); redraw(); }
                 drawing = false;
             }
@@ -140,26 +151,24 @@
 
         drawCanvas.addEventListener('mousemove', (e) => {
             if(!drawing) return;
-            const rect = drawCanvas.getBoundingClientRect();
-            let curX = Math.round((e.clientX - rect.left) / 10) * 10;
-            let curY = Math.round((e.clientY - rect.top) / 10) * 10;
+            const p = getPos(e); let curX = p.x, curY = p.y;
             if(isShiftDown){ if(Math.abs(curX-startX) > Math.abs(curY-startY)) curY=startY; else curX=startX; }
             redraw();
             drawCtx.strokeStyle = (currentTool==='dist'?'#ff0000':currentColor);
             drawCtx.lineWidth = 2;
             if(currentTool==='rect') drawCtx.strokeRect(startX, startY, curX-startX, curY-startY);
-            else { drawCtx.beginPath(); drawCtx.moveTo(startX, startY); drawCtx.lineTo(curX, curY); drawCtx.stroke(); }
+            else if(currentTool==='line' || currentTool==='dist'){
+                drawCtx.beginPath(); drawCtx.moveTo(startX, startY); drawCtx.lineTo(curX, curY); drawCtx.stroke();
+                if(currentTool==='dist'){ drawArrow(drawCtx, startX, startY, curX, curY); drawArrow(drawCtx, curX, curY, startX, startY); }
+            }
         });
 
         drawCanvas.addEventListener('mouseup', (e) => {
             if(!drawing) return;
-            const rect = drawCanvas.getBoundingClientRect();
-            let endX = Math.round((e.clientX - rect.left) / 10) * 10;
-            let endY = Math.round((e.clientY - rect.top) / 10) * 10;
+            const p = getPos(e); let endX = p.x, endY = p.y;
             if(isShiftDown){ if(Math.abs(endX-startX) > Math.abs(endY-startY)) endY=startY; else endX=startX; }
-            
             if(currentTool==='dist'){
-                const d = prompt("距離(m):");
+                const d = prompt("距離(数字のみでOK):");
                 if(d) shapes.push({type:'dist', x1:startX, y1:startY, x2:endX, y2:endY, text:d+"m", color:'#ff0000'});
             } else {
                 shapes.push({type:currentTool, x1:startX, y1:startY, x2:endX, y2:endY, color:currentColor});
@@ -170,21 +179,21 @@
         function redraw() {
             drawCtx.clearRect(0,0,drawCanvas.width, drawCanvas.height);
             shapes.forEach(s => {
-                drawCtx.strokeStyle = s.color; drawCtx.fillStyle = s.color; drawCtx.lineWidth = 2; drawCtx.font = "bold 16px sans-serif";
+                drawCtx.strokeStyle = s.color; drawCtx.fillStyle = s.color; drawCtx.lineWidth = 2; drawCtx.font = "bold 18px sans-serif";
                 if(s.type==='rect') drawCtx.strokeRect(s.x1, s.y1, s.x2-s.x1, s.y2-s.y1);
                 else if(s.type==='line' || s.type==='dist'){
                     drawCtx.beginPath(); drawCtx.moveTo(s.x1, s.y1); drawCtx.lineTo(s.x2, s.y2); drawCtx.stroke();
                     if(s.type==='dist'){
                         drawArrow(drawCtx, s.x1, s.y1, s.x2, s.y2); drawArrow(drawCtx, s.x2, s.y2, s.x1, s.y1);
                         const mx = (s.x1+s.x2)/2, my = (s.y1+s.y2)/2;
-                        drawCtx.clearRect(mx-20, my-10, 40, 20); drawCtx.textAlign="center"; drawCtx.fillText(s.text, mx, my+5);
+                        drawCtx.clearRect(mx-25, my-12, 50, 24); drawCtx.textAlign="center"; drawCtx.fillText(s.text, mx, my+7);
                     }
                 } else if(s.type==='text'){ drawCtx.textAlign="left"; drawCtx.fillText(s.text, s.x, s.y); }
             });
         }
 
         function drawArrow(ctx, x1, y1, x2, y2) {
-            const angle = Math.atan2(y2-y1, x2-x1), len = 10;
+            const angle = Math.atan2(y2-y1, x2-x1), len = 12;
             ctx.beginPath(); ctx.moveTo(x2, y2);
             ctx.lineTo(x2-len*Math.cos(angle-Math.PI/6), y2-len*Math.sin(angle-Math.PI/6));
             ctx.moveTo(x2, y2);
@@ -193,47 +202,55 @@
         }
 
         function undo() { shapes.pop(); redraw(); }
-        function clearCanvas() { shapes = []; redraw(); }
+        function clearCanvas() { if(confirm("描画をすべて消去しますか？")) { shapes = []; redraw(); } }
 
-        // --- PDF合成機能 ---
+        // --- PDF合成とダウンロード ---
         async function generateFinalPDF() {
-            if (!templatePdfBytes) { alert("テンプレートPDFを読み込んでください。"); return; }
-            
-            // 1. 清書したキャンバスを画像化（背景白）
-            const exportCanvas = document.createElement('canvas');
-            exportCanvas.width = drawCanvas.width; exportCanvas.height = drawCanvas.height;
-            const exCtx = exportCanvas.getContext('2d');
-            exCtx.fillStyle = "white"; exCtx.fillRect(0,0,exportCanvas.width, exportCanvas.height);
-            exCtx.drawImage(drawCanvas, 0, 0);
-            const pngUrl = exportCanvas.toDataURL('image/png');
-            const pngImageBytes = await fetch(pngUrl).then(res => res.arrayBuffer());
+            try {
+                // 1. テンプレートPDFの取得
+                const templateBytes = await fetch(TEMPLATE_URL).then(res => {
+                    if(!res.ok) throw new Error("テンプレートPDFの取得に失敗しました。");
+                    return res.arrayBuffer();
+                });
 
-            // 2. pdf-libで合成
-            const pdfDoc = await PDFDocument.load(templatePdfBytes);
-            const pngImage = await pdfDoc.embedPng(pngImageBytes);
-            const page = pdfDoc.getPage(0);
-            const { width, height } = page.getSize();
+                // 2. 清書内容を画像化
+                const exportCanvas = document.createElement('canvas');
+                exportCanvas.width = drawCanvas.width; exportCanvas.height = drawCanvas.height;
+                const exCtx = exportCanvas.getContext('2d');
+                exCtx.fillStyle = "white"; exCtx.fillRect(0,0,exportCanvas.width, exportCanvas.height);
+                exCtx.drawImage(drawCanvas, 0, 0);
+                const pngImageBytes = await fetch(exportCanvas.toDataURL('image/png')).then(res => res.arrayBuffer());
 
-            // 配置図記載欄の座標計算 (A4の場合の目安)
-            // 右側のボックスはおよそ X:50%〜95%, Y:15%〜85%
-            const boxX = width * 0.505; 
-            const boxY = height * 0.27; 
-            const boxW = width * 0.42;
-            const boxH = height * 0.55;
+                // 3. PDF合成
+                const pdfDoc = await PDFDocument.load(templateBytes);
+                const pngImage = await pdfDoc.embedPng(pngImageBytes);
+                const page = pdfDoc.getPage(0);
+                const { width, height } = page.getSize();
 
-            page.drawImage(pngImage, {
-                x: boxX,
-                y: boxY,
-                width: boxW,
-                height: boxH,
-            });
+                // 配置図記載欄（右側の枠）への座標計算
+                // PDF-libの座標系は左下が(0,0)
+                const targetX = width * 0.505; 
+                const targetY = height * 0.275; 
+                const targetW = width * 0.425; 
+                const targetH = height * 0.55; 
 
-            const pdfBytes = await pdfDoc.save();
-            const blob = new Blob([pdfBytes], { type: "application/pdf" });
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = "保管場所配置図_完成品.pdf";
-            link.click();
+                page.drawImage(pngImage, {
+                    x: targetX,
+                    y: targetY,
+                    width: targetW,
+                    height: targetH,
+                });
+
+                const pdfBytes = await pdfDoc.save();
+                const blob = new Blob([pdfBytes], { type: "application/pdf" });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = "保管場所所在図・配置図_作成済み.pdf";
+                link.click();
+            } catch (err) {
+                alert("エラーが発生しました: " + err.message);
+                console.error(err);
+            }
         }
     </script>
 </body>
