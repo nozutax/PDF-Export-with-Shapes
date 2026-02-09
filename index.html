@@ -2,155 +2,202 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>配置図作成アプリ</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
-    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <title>配置図・清書ツール</title>
     <style>
         body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f0f0; }
-        .toolbar { margin: 10px; padding: 10px; background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        /* 125mm x 115mm を pxに変換 (96dpi換算: 1mm ≒ 3.78px) */
-        canvas { border: 1px solid #ccc; background-color: #fff; }
-        .canvas-container { box-shadow: 0 0 10px rgba(0,0,0,0.2); }
-        button { cursor: pointer; padding: 5px 10px; }
-        .active { background-color: #add8e6; }
+        .toolbar { background: #fff; padding: 10px; margin: 10px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); display: flex; gap: 10px; flex-wrap: wrap; }
+        #canvas-container { position: relative; border: 2px solid #333; background: white; cursor: crosshair; overflow: hidden; }
+        canvas { position: absolute; top: 0; left: 0; }
+        #bg-canvas { z-index: 1; }
+        #draw-canvas { z-index: 2; }
+        .controls { margin-top: 10px; }
+        button { padding: 8px 12px; cursor: pointer; border: 1px solid #ccc; background: #fff; }
+        button.active { background: #007bff; color: white; border-color: #0056b3; }
+        .hint { font-size: 0.8em; color: #666; margin-top: 5px; }
     </style>
 </head>
 <body>
 
-<div class="toolbar">
-    <button onclick="addRect()">四角形</button>
-    <button onclick="addLine()">直線</button>
-    <button onclick="addArrow()">矢印</button>
-    <button onclick="addText()">テキスト</button>
-    | 
-    <button onclick="setColor('black')">黒</button>
-    <button onclick="setColor('red')" style="color:red">赤</button>
-    |
-    <button onclick="applyHatch()">網掛け(選択中図形)</button>
-    |
-    <button onclick="exportPDF()" style="background-color: #4CAF50; color: white;">PDF出力</button>
-</div>
+    <h2>配置図・清書アプリ</h2>
 
-<!-- 125mm x 115mm の描画領域 -->
-<canvas id="canvas" width="472" height="434"></canvas>
+    <div class="toolbar">
+        <input type="file" id="imageLoader" accept="image/*">
+        <label>下書き透明度: <input type="range" id="opacityRange" min="0" max="100" value="50"></label>
+        <hr w-100>
+        <button onclick="setTool('rect')" id="tool-rect">長方形</button>
+        <button onclick="setTool('line')" id="tool-line">直線</button>
+        <button onclick="setTool('arrow')" id="tool-arrow">矢印</button>
+        <button onclick="setTool('text')" id="tool-text">テキスト</button>
+        <button onclick="undo()" style="margin-left:20px;">1つ戻す</button>
+        <button onclick="clearCanvas()" style="color:red;">全部消去</button>
+        <button onclick="download()" style="background:#28a745; color:white;">清書を保存(PNG)</button>
+    </div>
 
-<script>
-    const canvas = new fabric.Canvas('canvas');
-    let currentColor = 'black';
+    <div id="canvas-container" style="width: 800px; height: 600px;">
+        <canvas id="bg-canvas" width="800" height="600"></canvas>
+        <canvas id="draw-canvas" width="800" height="600"></canvas>
+    </div>
 
-    // 1. 図形追加機能
-    function addRect() {
-        const rect = new fabric.Rect({
-            left: 50, top: 50, fill: 'transparent', 
-            stroke: currentColor, strokeWidth: 2, width: 100, height: 80 
-        });
-        canvas.add(rect);
-    }
+    <div class="hint">
+        操作方法：ツールを選んでドラッグで描画。テキストはクリックした場所に入力。
+    </div>
 
-    function addText() {
-        const text = new fabric.IText('テキスト入力', {
-            left: 50, top: 50, fontSize: 16, fill: currentColor
-        });
-        canvas.add(text);
-    }
+    <script>
+        const bgCanvas = document.getElementById('bg-canvas');
+        const bgCtx = bgCanvas.getContext('2d');
+        const drawCanvas = document.getElementById('draw-canvas');
+        const drawCtx = drawCanvas.getContext('2d');
+        const imageLoader = document.getElementById('imageLoader');
+        const opacityRange = document.getElementById('opacityRange');
 
-    function addLine() {
-        const line = new fabric.Line([50, 50, 150, 50], {
-            stroke: currentColor, strokeWidth: 2
-        });
-        canvas.add(line);
-    }
+        let currentTool = 'rect';
+        let drawing = false;
+        let startX, startY;
+        let shapes = []; // 描画データの保持
+        let currentShape = null;
 
-    function addArrow() {
-        // 簡易的な矢印（Fabric.jsではカスタムが必要）
-        const line = new fabric.Line([50, 50, 150, 50], { stroke: currentColor, strokeWidth: 2 });
-        const triangle = new fabric.Triangle({
-            width: 10, height: 15, fill: currentColor, 
-            left: 150, top: 50, angle: 90, originX: 'center', originY: 'center'
-        });
-        const group = new fabric.Group([line, triangle], { left: 50, top: 50 });
-        canvas.add(group);
-    }
-
-    // 2. 色設定
-    function setColor(color) {
-        currentColor = color;
-        const activeObject = canvas.getActiveObject();
-        if (activeObject) {
-            if (activeObject.set) {
-                activeObject.set('stroke', color);
-                if (activeObject.type === 'i-text') activeObject.set('fill', color);
-                canvas.renderAll();
+        // 画像の読み込み
+        imageLoader.addEventListener('change', (e) => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
+                    // 画像をキャンバスにフィットさせる
+                    const ratio = Math.min(bgCanvas.width / img.width, bgCanvas.height / img.height);
+                    bgCtx.drawImage(img, 0, 0, img.width * ratio, img.height * ratio);
+                }
+                img.src = event.target.result;
             }
+            reader.readAsDataURL(e.target.files[0]);
+        });
+
+        // 透明度の変更
+        opacityRange.addEventListener('input', (e) => {
+            bgCanvas.style.opacity = e.target.value / 100;
+        });
+
+        function setTool(tool) {
+            currentTool = tool;
+            document.querySelectorAll('.toolbar button').forEach(btn => btn.classList.remove('active'));
+            document.getElementById('tool-' + tool).classList.add('active');
         }
-    }
 
-    // 3. 網掛け（パターンの適用）
-    function applyHatch() {
-        const activeObject = canvas.getActiveObject();
-        if (!activeObject) return;
+        drawCanvas.addEventListener('mousedown', (e) => {
+            const rect = drawCanvas.getBoundingClientRect();
+            startX = e.clientX - rect.left;
+            startY = e.clientY - rect.top;
+            drawing = true;
 
-        // 斜線パターンの作成
-        const patternCanvas = document.createElement('canvas');
-        patternCanvas.width = patternCanvas.height = 10;
-        const pCtx = patternCanvas.getContext('2d');
-        pCtx.strokeStyle = currentColor;
-        pCtx.lineWidth = 1;
-        pCtx.beginPath();
-        pCtx.moveTo(0, 10); pCtx.lineTo(10, 0);
-        pCtx.stroke();
-
-        const pattern = new fabric.Pattern({
-            source: patternCanvas,
-            repeat: 'repeat'
+            if (currentTool === 'text') {
+                const text = prompt("入力する文字:");
+                if (text) {
+                    shapes.push({ type: 'text', x: startX, y: startY, text: text });
+                    redraw();
+                }
+                drawing = false;
+            }
         });
 
-        activeObject.set('fill', pattern);
-        canvas.renderAll();
-    }
+        drawCanvas.addEventListener('mousemove', (e) => {
+            if (!drawing) return;
+            const rect = drawCanvas.getBoundingClientRect();
+            const currX = e.clientX - rect.left;
+            const currY = e.clientY - rect.top;
 
-    // 4. PDF出力 (pdf-libを使用)
-    async function exportPDF() {
-        const { PDFDocument, rgb } = PDFLib;
-        
-        // テンプレートPDFの読み込み（ここでは新規作成しますが、実際は既存PDFをfetch）
-        // const existingPdfBytes = await fetch('template.pdf').then(res => res.arrayBuffer());
-        // const pdfDoc = await PDFDocument.load(existingPdfBytes);
-        const pdfDoc = await PDFDocument.create();
-        const page = pdfDoc.addPage([595.28, 841.89]); // A4サイズ (pts)
+            redraw(); // 再描画
 
-        // キャンバスを画像化
-        const dataUrl = canvas.toDataURL({ format: 'png', multiplier: 2 });
-        const image = await pdfDoc.embedPng(dataUrl);
-
-        // 配置図の枠内に出力するための座標計算
-        // A4: 210mm x 297mm (1mm = 2.834pts)
-        // ターゲット: 125mm x 115mm
-        const widthPts = 125 * 2.834;
-        const heightPts = 115 * 2.834;
-
-        /* 
-           PDF内の配置位置（座標は左下が0,0）
-           「配置図記載欄」の正確な位置に合わせて調整が必要です。
-           例：右側にある場合、x=80mm(226pts), y=50mm(141pts) 程度
-        */
-        page.drawImage(image, {
-            x: 310, // 右側のボックスに合わせるための概算値
-            y: 350, // 上部の位置に合わせるための概算値
-            width: widthPts,
-            height: heightPts,
+            // プレビュー描画
+            drawCtx.strokeStyle = '#000';
+            drawCtx.lineWidth = 2;
+            if (currentTool === 'rect') {
+                drawCtx.strokeRect(startX, startY, currX - startX, currY - startY);
+            } else if (currentTool === 'line' || currentTool === 'arrow') {
+                drawCtx.beginPath();
+                drawCtx.moveTo(startX, startY);
+                drawCtx.lineTo(currX, currY);
+                drawCtx.stroke();
+                if(currentTool === 'arrow') drawArrowhead(drawCtx, startX, startY, currX, currY);
+            }
         });
 
-        const pdfBytes = await pdfDoc.save();
-        
-        // ダウンロード処理
-        const blob = new Blob([pdfBytes], { type: "application/pdf" });
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = "保管場所配置図.pdf";
-        link.click();
-    }
-</script>
+        drawCanvas.addEventListener('mouseup', (e) => {
+            if (!drawing) return;
+            const rect = drawCanvas.getBoundingClientRect();
+            const endX = e.clientX - rect.left;
+            const endY = e.clientY - rect.top;
+            
+            shapes.push({
+                type: currentTool,
+                x1: startX, y1: startY,
+                x2: endX, y2: endY
+            });
+            
+            drawing = false;
+            redraw();
+        });
 
+        function redraw() {
+            drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+            drawCtx.strokeStyle = '#000';
+            drawCtx.fillStyle = '#000';
+            drawCtx.lineWidth = 2;
+            drawCtx.font = "16px sans-serif";
+
+            shapes.forEach(s => {
+                if (s.type === 'rect') {
+                    drawCtx.strokeRect(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1);
+                } else if (s.type === 'line') {
+                    drawCtx.beginPath();
+                    drawCtx.moveTo(s.x1, s.y1);
+                    drawCtx.lineTo(s.x2, s.y2);
+                    drawCtx.stroke();
+                } else if (s.type === 'arrow') {
+                    drawCtx.beginPath();
+                    drawCtx.moveTo(s.x1, s.y1);
+                    drawCtx.lineTo(s.x2, s.y2);
+                    drawCtx.stroke();
+                    drawArrowhead(drawCtx, s.x1, s.y1, s.x2, s.y2);
+                } else if (s.type === 'text') {
+                    drawCtx.fillText(s.text, s.x, s.y);
+                }
+            });
+        }
+
+        function drawArrowhead(ctx, x1, y1, x2, y2) {
+            const headlen = 10;
+            const angle = Math.atan2(y2 - y1, x2 - x1);
+            ctx.beginPath();
+            ctx.moveTo(x2, y2);
+            ctx.lineTo(x2 - headlen * Math.cos(angle - Math.PI / 6), y2 - headlen * Math.sin(angle - Math.PI / 6));
+            ctx.moveTo(x2, y2);
+            ctx.lineTo(x2 - headlen * Math.cos(angle + Math.PI / 6), y2 - headlen * Math.sin(angle + Math.PI / 6));
+            ctx.stroke();
+        }
+
+        function undo() { shapes.pop(); redraw(); }
+        function clearCanvas() { shapes = []; redraw(); }
+
+        function download() {
+            // 背景を白にして清書だけを書き出す用の一時的なキャンバス
+            const exportCanvas = document.createElement('canvas');
+            exportCanvas.width = drawCanvas.width;
+            exportCanvas.height = drawCanvas.height;
+            const exCtx = exportCanvas.getContext('2d');
+            
+            exCtx.fillStyle = "white";
+            exCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+            
+            // 現在の描画内容をコピー
+            exCtx.drawImage(drawCanvas, 0, 0);
+            
+            const link = document.createElement('a');
+            link.download = '配置図_清書.png';
+            link.href = exportCanvas.toDataURL();
+            link.click();
+        }
+        
+        setTool('rect');
+    </script>
 </body>
 </html>
