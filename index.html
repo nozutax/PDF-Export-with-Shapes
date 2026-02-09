@@ -2,77 +2,113 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>配置図・清書ツール</title>
+    <title>配置図・清書ツール (PDF対応版)</title>
+    <!-- PDF.js の読み込み -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
     <style>
-        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f0f0; }
-        .toolbar { background: #fff; padding: 10px; margin: 10px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); display: flex; gap: 10px; flex-wrap: wrap; }
-        #canvas-container { position: relative; border: 2px solid #333; background: white; cursor: crosshair; overflow: hidden; }
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f0f0; margin: 0; padding: 20px; }
+        .toolbar { background: #fff; padding: 15px; margin-bottom: 10px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; max-width: 900px; }
+        #canvas-container { position: relative; border: 2px solid #333; background: white; cursor: crosshair; overflow: auto; max-width: 100%; max-height: 80vh; }
         canvas { position: absolute; top: 0; left: 0; }
         #bg-canvas { z-index: 1; }
         #draw-canvas { z-index: 2; }
-        .controls { margin-top: 10px; }
-        button { padding: 8px 12px; cursor: pointer; border: 1px solid #ccc; background: #fff; }
+        button { padding: 8px 12px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
+        button:hover { background: #eee; }
         button.active { background: #007bff; color: white; border-color: #0056b3; }
-        .hint { font-size: 0.8em; color: #666; margin-top: 5px; }
+        .hint { font-size: 0.85em; color: #555; margin-top: 10px; background: #e9ecef; padding: 10px; border-radius: 5px; }
+        input[type="range"] { vertical-align: middle; }
     </style>
 </head>
 <body>
 
-    <h2>配置図・清書アプリ</h2>
+    <h2>配置図・清書アプリ (PDF/画像対応)</h2>
 
     <div class="toolbar">
-        <input type="file" id="imageLoader" accept="image/*">
+        <input type="file" id="fileLoader" accept="image/*,application/pdf">
         <label>下書き透明度: <input type="range" id="opacityRange" min="0" max="100" value="50"></label>
-        <hr w-100>
-        <button onclick="setTool('rect')" id="tool-rect">長方形</button>
+        <div style="border-left: 1px solid #ccc; height: 25px; margin: 0 10px;"></div>
+        <button onclick="setTool('rect')" id="tool-rect" class="active">長方形</button>
         <button onclick="setTool('line')" id="tool-line">直線</button>
         <button onclick="setTool('arrow')" id="tool-arrow">矢印</button>
         <button onclick="setTool('text')" id="tool-text">テキスト</button>
-        <button onclick="undo()" style="margin-left:20px;">1つ戻す</button>
+        <div style="border-left: 1px solid #ccc; height: 25px; margin: 0 10px;"></div>
+        <button onclick="undo()">1つ戻す</button>
         <button onclick="clearCanvas()" style="color:red;">全部消去</button>
-        <button onclick="download()" style="background:#28a745; color:white;">清書を保存(PNG)</button>
+        <button onclick="download()" style="background:#28a745; color:white; font-weight:bold; border:none;">清書を保存(PNG)</button>
     </div>
 
-    <div id="canvas-container" style="width: 800px; height: 600px;">
+    <div id="canvas-container">
+        <!-- 初期サイズ。ファイル読み込み時にリサイズされます -->
         <canvas id="bg-canvas" width="800" height="600"></canvas>
         <canvas id="draw-canvas" width="800" height="600"></canvas>
     </div>
 
     <div class="hint">
-        操作方法：ツールを選んでドラッグで描画。テキストはクリックした場所に入力。
+        <strong>使い方:</strong><br>
+        1. 画像またはPDFを読み込む → 2. 下書きに合わせて図形を描画（ドラッグ操作） → 3. テキストはクリックして入力 → 4. 保存ボタンで清書のみ書き出し
     </div>
 
     <script>
+        // PDF.jsの設定
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
         const bgCanvas = document.getElementById('bg-canvas');
         const bgCtx = bgCanvas.getContext('2d');
         const drawCanvas = document.getElementById('draw-canvas');
         const drawCtx = drawCanvas.getContext('2d');
-        const imageLoader = document.getElementById('imageLoader');
+        const container = document.getElementById('canvas-container');
+        const fileLoader = document.getElementById('fileLoader');
         const opacityRange = document.getElementById('opacityRange');
 
         let currentTool = 'rect';
         let drawing = false;
         let startX, startY;
-        let shapes = []; // 描画データの保持
-        let currentShape = null;
+        let shapes = [];
 
-        // 画像の読み込み
-        imageLoader.addEventListener('change', (e) => {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                const img = new Image();
-                img.onload = () => {
-                    bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
-                    // 画像をキャンバスにフィットさせる
-                    const ratio = Math.min(bgCanvas.width / img.width, bgCanvas.height / img.height);
-                    bgCtx.drawImage(img, 0, 0, img.width * ratio, img.height * ratio);
+        // ファイル読み込み処理
+        fileLoader.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            if (file.type === "application/pdf") {
+                const reader = new FileReader();
+                reader.onload = async function() {
+                    const typedarray = new Uint8Array(this.result);
+                    const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                    const page = await pdf.getPage(1); // 1ページ目を取得
+                    
+                    const viewport = page.getViewport({ scale: 1.5 }); // 少し高解像度で読み込み
+                    resizeCanvases(viewport.width, viewport.height);
+
+                    await page.render({
+                        canvasContext: bgCtx,
+                        viewport: viewport
+                    }).promise;
+                };
+                reader.readAsArrayBuffer(file);
+            } else {
+                // 画像の場合
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        resizeCanvases(img.width, img.height);
+                        bgCtx.drawImage(img, 0, 0);
+                    }
+                    img.src = event.target.result;
                 }
-                img.src = event.target.result;
+                reader.readAsDataURL(file);
             }
-            reader.readAsDataURL(e.target.files[0]);
         });
 
-        // 透明度の変更
+        function resizeCanvases(w, h) {
+            bgCanvas.width = drawCanvas.width = w;
+            bgCanvas.height = drawCanvas.height = h;
+            container.style.width = w + "px";
+            container.style.height = h + "px";
+            redraw();
+        }
+
         opacityRange.addEventListener('input', (e) => {
             bgCanvas.style.opacity = e.target.value / 100;
         });
@@ -80,13 +116,14 @@
         function setTool(tool) {
             currentTool = tool;
             document.querySelectorAll('.toolbar button').forEach(btn => btn.classList.remove('active'));
-            document.getElementById('tool-' + tool).classList.add('active');
+            const target = document.getElementById('tool-' + tool);
+            if(target) target.classList.add('active');
         }
 
         drawCanvas.addEventListener('mousedown', (e) => {
             const rect = drawCanvas.getBoundingClientRect();
-            startX = e.clientX - rect.left;
-            startY = e.clientY - rect.top;
+            startX = (e.clientX - rect.left) * (drawCanvas.width / rect.width);
+            startY = (e.clientY - rect.top) * (drawCanvas.height / rect.height);
             drawing = true;
 
             if (currentTool === 'text') {
@@ -102,12 +139,11 @@
         drawCanvas.addEventListener('mousemove', (e) => {
             if (!drawing) return;
             const rect = drawCanvas.getBoundingClientRect();
-            const currX = e.clientX - rect.left;
-            const currY = e.clientY - rect.top;
+            const currX = (e.clientX - rect.left) * (drawCanvas.width / rect.width);
+            const currY = (e.clientY - rect.top) * (drawCanvas.height / rect.height);
 
-            redraw(); // 再描画
-
-            // プレビュー描画
+            redraw();
+            
             drawCtx.strokeStyle = '#000';
             drawCtx.lineWidth = 2;
             if (currentTool === 'rect') {
@@ -124,8 +160,8 @@
         drawCanvas.addEventListener('mouseup', (e) => {
             if (!drawing) return;
             const rect = drawCanvas.getBoundingClientRect();
-            const endX = e.clientX - rect.left;
-            const endY = e.clientY - rect.top;
+            const endX = (e.clientX - rect.left) * (drawCanvas.width / rect.width);
+            const endY = (e.clientY - rect.top) * (drawCanvas.height / rect.height);
             
             shapes.push({
                 type: currentTool,
@@ -142,7 +178,7 @@
             drawCtx.strokeStyle = '#000';
             drawCtx.fillStyle = '#000';
             drawCtx.lineWidth = 2;
-            drawCtx.font = "16px sans-serif";
+            drawCtx.font = "bold 18px sans-serif";
 
             shapes.forEach(s => {
                 if (s.type === 'rect') {
@@ -158,6 +194,7 @@
                     drawCtx.lineTo(s.x2, s.y2);
                     drawCtx.stroke();
                     drawArrowhead(drawCtx, s.x1, s.y1, s.x2, s.y2);
+                    drawArrowhead(drawCtx, s.x2, s.y2, s.x1, s.y1); // 両矢印
                 } else if (s.type === 'text') {
                     drawCtx.fillText(s.text, s.x, s.y);
                 }
@@ -165,7 +202,7 @@
         }
 
         function drawArrowhead(ctx, x1, y1, x2, y2) {
-            const headlen = 10;
+            const headlen = 12;
             const angle = Math.atan2(y2 - y1, x2 - x1);
             ctx.beginPath();
             ctx.moveTo(x2, y2);
@@ -176,19 +213,15 @@
         }
 
         function undo() { shapes.pop(); redraw(); }
-        function clearCanvas() { shapes = []; redraw(); }
+        function clearCanvas() { if(confirm("全て消去しますか？")) { shapes = []; redraw(); } }
 
         function download() {
-            // 背景を白にして清書だけを書き出す用の一時的なキャンバス
             const exportCanvas = document.createElement('canvas');
             exportCanvas.width = drawCanvas.width;
             exportCanvas.height = drawCanvas.height;
             const exCtx = exportCanvas.getContext('2d');
-            
             exCtx.fillStyle = "white";
             exCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
-            
-            // 現在の描画内容をコピー
             exCtx.drawImage(drawCanvas, 0, 0);
             
             const link = document.createElement('a');
@@ -196,8 +229,6 @@
             link.href = exportCanvas.toDataURL();
             link.click();
         }
-        
-        setTool('rect');
     </script>
 </body>
 </html>
