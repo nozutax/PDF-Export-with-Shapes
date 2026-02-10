@@ -2,15 +2,31 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>配置図作成ツール (機能向上版)</title>
+    <title>配置図作成ツール (プロ仕様)</title>
     <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
     <style>
-        body { font-family: 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; align-items: center; background: #f4f7f6; margin: 0; padding: 20px; }
-        .toolbar { background: #fff; padding: 15px; margin-bottom: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; border: 1px solid #ddd; }
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; align-items: center; background: #f4f7f6; margin: 0; padding: 20px; cursor: none; /* 標準カーソルを消す */ }
+        .toolbar { background: #fff; padding: 15px; margin-bottom: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; border: 1px solid #ddd; cursor: default; }
         .group { display: flex; align-items: center; gap: 8px; border-right: 1px solid #eee; padding-right: 12px; margin-right: 5px; }
         .group:last-child { border-right: none; }
-        #canvas-container { position: relative; width: 708px; height: 681px; border: 2px solid #333; background: white; cursor: crosshair; box-shadow: 0 0 20px rgba(0,0,0,0.1); }
+        
+        #canvas-container { 
+            position: relative; width: 708px; height: 681px; border: 2px solid #333; background: white; 
+            box-shadow: 0 0 20px rgba(0,0,0,0.1); overflow: visible;
+        }
         canvas { position: absolute; top: 0; left: 0; width: 708px; height: 681px; }
+        
+        /* 反転カーソル */
+        #custom-cursor {
+            position: fixed; width: 30px; height: 30px; pointer-events: none; z-index: 9999;
+            mix-blend-mode: difference; transform: translate(-50%, -50%);
+        }
+        #custom-cursor::before, #custom-cursor::after {
+            content: ''; position: absolute; background: white;
+        }
+        #custom-cursor::before { top: 14px; left: 0; width: 30px; height: 2px; } /* 横線 */
+        #custom-cursor::after { left: 14px; top: 0; width: 2px; height: 30px; } /* 縦線 */
+
         button { padding: 10px 15px; cursor: pointer; border: 1px solid #ddd; background: #fff; border-radius: 6px; font-size: 14px; transition: 0.2s; }
         button:hover { background: #f9f9f9; border-color: #bbb; }
         button.active { background: #007bff; color: white; border-color: #0056b3; }
@@ -18,22 +34,23 @@
         .color-btn.active { outline: 3px solid #007bff; }
         .download-btn { background: #28a745 !important; color: white !important; font-weight: bold; border: none !important; padding: 10px 25px !important; }
 
-        /* カスタムモーダル（複数線用） */
+        /* モーダル */
         #multi-modal {
             display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            background: white; padding: 20px; border-radius: 12px; box-shadow: 0 5px 25px rgba(0,0,0,0.3); z-index: 1000; border: 1px solid #ccc;
+            background: white; padding: 25px; border-radius: 12px; box-shadow: 0 5px 30px rgba(0,0,0,0.4); z-index: 1000; border: 1px solid #ccc; cursor: default;
         }
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 999; }
-        .modal-btns { display: flex; gap: 10px; margin-top: 15px; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.3); z-index: 999; }
+        .modal-btns { display: flex; gap: 10px; margin-top: 20px; }
         .modal-btns button { flex: 1; padding: 12px; font-weight: bold; }
-        .btn-v { background: #f0f7ff; color: #007bff; }
-        .btn-h { background: #fff0f0; color: #d9534f; }
-        .btn-cancel { background: #eee; color: #333; }
+        .btn-v { background: #007bff; color: white; }
+        .btn-h { background: #6c757d; color: white; }
     </style>
 </head>
-<body>
+<body onmousemove="moveCursor(event)">
 
-    <h2 style="margin-top: 0; color: #333;">配置図・清書ツール</h2>
+    <div id="custom-cursor"></div>
+
+    <h2 style="margin-top: 0; color: #333; cursor: default;">配置図・清書ツール</h2>
 
     <div class="toolbar">
         <div class="group">
@@ -58,15 +75,15 @@
         <canvas id="draw-canvas" width="708" height="681"></canvas>
     </div>
 
-    <!-- 複数線設定用モーダル -->
     <div class="modal-overlay" id="modal-overlay"></div>
     <div id="multi-modal">
         <h3 style="margin-top:0">複数線の設定</h3>
-        引く線の本数: <input type="number" id="multi-count" value="3" min="1" max="50" style="width: 50px; padding: 5px;">
+        <p>全体の線の本数を指定してください:</p>
+        <input type="number" id="multi-count" value="3" min="2" max="50" style="width: 100%; padding: 10px; font-size: 18px; box-sizing: border-box;">
         <div class="modal-btns">
-            <button class="btn-v" onclick="confirmMulti('V')">縦線</button>
-            <button class="btn-h" onclick="confirmMulti('H')">横線</button>
-            <button class="btn-cancel" onclick="closeModal()">キャンセル</button>
+            <button class="btn-v" onclick="confirmMulti('V')">縦に並べる</button>
+            <button class="btn-h" onclick="confirmMulti('H')">横に並べる</button>
+            <button class="btn-cancel" onclick="closeModal()">中止</button>
         </div>
     </div>
 
@@ -76,13 +93,21 @@
 
         const drawCanvas = document.getElementById('draw-canvas');
         const drawCtx = drawCanvas.getContext('2d');
+        const cursor = document.getElementById('custom-cursor');
+        
         let currentTool = 'rect', currentColor = '#000000', drawing = false;
         let startX, startY, shapes = [], isShiftDown = false;
-        let tempMultiRect = null; // 複数線描画用の一時範囲
+        let tempMultiRect = null;
 
-        const FONT_SIZE_L = "bold 32px sans-serif"; // 一般文字
-        const FONT_SIZE_S = "bold 24px sans-serif"; // 距離表示用 (縮小)
+        const FONT_SIZE_L = "bold 32px sans-serif";
+        const FONT_SIZE_S = "bold 24px sans-serif"; 
         const LINE_WIDTH = 3; 
+
+        // カーソル移動
+        function moveCursor(e) {
+            cursor.style.left = e.clientX + 'px';
+            cursor.style.top = e.clientY + 'px';
+        }
 
         window.addEventListener('keydown', (e) => { if(e.key === 'Shift') isShiftDown = true; });
         window.addEventListener('keyup', (e) => { if(e.key === 'Shift') isShiftDown = false; });
@@ -100,11 +125,25 @@
             if(t==='dist') setColor('#ff0000');
         }
 
+        // スナップと境界処理
         function getPos(e) {
             const rect = drawCanvas.getBoundingClientRect();
             let x = e.clientX - rect.left;
             let y = e.clientY - rect.top;
-            return { x: Math.round(x/10)*10, y: Math.round(y/10)*10 };
+
+            // キャンバス外でも端に吸着させる（クランプ）
+            x = Math.max(0, Math.min(drawCanvas.width, x));
+            y = Math.max(0, Math.min(drawCanvas.height, y));
+
+            // 10pxスナップ
+            x = Math.round(x / 10) * 10;
+            y = Math.round(y / 10) * 10;
+
+            // 端っこ（708pxなど）に極めて近い場合は端に吸着
+            if (Math.abs(x - drawCanvas.width) < 10) x = drawCanvas.width;
+            if (Math.abs(y - drawCanvas.height) < 10) y = drawCanvas.height;
+
+            return { x, y };
         }
 
         drawCanvas.addEventListener('mousedown', (e) => {
@@ -156,7 +195,6 @@
             }
         });
 
-        // モーダル操作
         function openModal() {
             document.getElementById('modal-overlay').style.display = 'block';
             document.getElementById('multi-modal').style.display = 'block';
@@ -168,7 +206,7 @@
         }
         function confirmMulti(direction) {
             const count = parseInt(document.getElementById('multi-count').value);
-            if(!isNaN(count) && count > 0 && tempMultiRect){
+            if(!isNaN(count) && count >= 2 && tempMultiRect){
                 shapes.push({type:'multi', ...tempMultiRect, count:count, dir:direction});
             }
             closeModal();
@@ -182,13 +220,15 @@
                     drawCtx.strokeRect(s.x1, s.y1, s.x2-s.x1, s.y2-s.y1);
                 } else if(s.type==='multi'){
                     const dx = s.x2 - s.x1; const dy = s.y2 - s.y1;
-                    for(let i=1; i <= s.count; i++){
+                    // 指定本数を範囲の両端含めて均等割り
+                    for(let i=0; i < s.count; i++){
                         drawCtx.beginPath();
+                        const ratio = i / (s.count - 1);
                         if(s.dir === 'V'){
-                            let px = s.x1 + (dx * i) / (s.count + 1);
+                            let px = s.x1 + (dx * ratio);
                             drawCtx.moveTo(px, s.y1); drawCtx.lineTo(px, s.y2);
                         } else {
-                            let py = s.y1 + (dy * i) / (s.count + 1);
+                            let py = s.y1 + (dy * ratio);
                             drawCtx.moveTo(s.x1, py); drawCtx.lineTo(s.x2, py);
                         }
                         drawCtx.stroke();
