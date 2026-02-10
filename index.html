@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>配置図作成ツール (斜線ツール付)</title>
+    <title>配置図作成ツール (プレビュー復旧版)</title>
     <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
     <style>
         body { font-family: 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; align-items: center; background: #f4f7f6; margin: 0; padding: 20px; cursor: none; }
@@ -39,7 +39,7 @@
         .hint-bar { font-size: 12px; color: #666; margin-top: 5px; }
     </style>
 </head>
-<body onmousemove="moveCursor(event)" onmousedown="handleGlobalMouseDown(event)" onmouseup="handleGlobalMouseUp(event)">
+<body onmousemove="handleGlobalMouseMove(event)" onmousedown="handleGlobalMouseDown(event)" onmouseup="handleGlobalMouseUp(event)">
 
     <div id="custom-cursor"></div>
 
@@ -67,12 +67,13 @@
         <canvas id="draw-canvas" width="708" height="681"></canvas>
     </div>
 
-    <div class="hint-bar">斜線ツール：クリックで角を指定、ダブルクリックで確定。</div>
+    <div class="hint-bar">Shiftキー：垂直・水平固定 | 領域外クリック：端にスナップして描画 | 斜線：クリックで点追加、ダブルクリックで完了</div>
 
     <div class="modal-overlay" id="modal-overlay"></div>
     <div id="multi-modal">
         <h3 style="margin-top:0">複数線の設定</h3>
-        <input type="number" id="multi-count" value="3" min="2" style="width: 100%; padding: 10px; font-size: 18px;">
+        <p>全体の線の本数を指定してください:</p>
+        <input type="number" id="multi-count" value="3" min="2" style="width: 100%; padding: 10px; font-size: 18px; box-sizing: border-box;">
         <div style="display:flex; gap:10px; margin-top:20px;">
             <button style="flex:1; background:#007bff; color:white;" onclick="confirmMulti('V')">縦に並べる</button>
             <button style="flex:1; background:#6c757d; color:white;" onclick="confirmMulti('H')">横に並べる</button>
@@ -90,57 +91,88 @@
         
         let currentTool = 'rect', currentColor = '#000000', drawing = false;
         let startX, startY, shapes = [], isShiftDown = false;
-        let hatchPoints = []; // 斜線ツール用の一時座標
+        let hatchPoints = []; // 斜線ツール用
+        let lastMouseX = 0, lastMouseY = 0; // マウス位置追跡用
+        let tempMultiRect = null; // 複数線一時保存
 
-        function moveCursor(e) {
-            cursor.style.left = e.clientX + 'px';
-            cursor.style.top = e.clientY + 'px';
-            if (drawing || hatchPoints.length > 0) redraw();
-        }
+        const FONT_SIZE_L = "bold 32px sans-serif";
+        const FONT_SIZE_S = "bold 24px sans-serif"; 
+        const LINE_WIDTH = 3; 
 
+        window.addEventListener('keydown', (e) => { if(e.key === 'Shift') isShiftDown = true; redraw(); });
+        window.addEventListener('keyup', (e) => { if(e.key === 'Shift') isShiftDown = false; redraw(); });
+
+        // マウス位置取得（スナップ付き）
         function getPos(clientX, clientY) {
             const rect = canvas.getBoundingClientRect();
             let x = clientX - rect.left;
             let y = clientY - rect.top;
+
+            // クランプ（キャンバス内に収める）
             x = Math.max(0, Math.min(canvas.width, x));
             y = Math.max(0, Math.min(canvas.height, y));
+
+            // 10pxスナップ
             x = Math.round(x / 10) * 10;
             y = Math.round(y / 10) * 10;
+
+            // 端吸着強化
             if (Math.abs(x - canvas.width) < 10) x = canvas.width;
             if (Math.abs(y - canvas.height) < 10) y = canvas.height;
+
             return { x, y };
+        }
+
+        function handleGlobalMouseMove(e) {
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+
+            // カスタムカーソル移動
+            cursor.style.left = e.clientX + 'px';
+            cursor.style.top = e.clientY + 'px';
+
+            if (drawing || hatchPoints.length > 0) {
+                redraw();
+            }
         }
 
         function handleGlobalMouseDown(e) {
             if (e.target.closest('.toolbar') || e.target.closest('#multi-modal')) return;
+            
             const p = getPos(e.clientX, e.clientY);
 
             if (currentTool === 'hatch') {
                 hatchPoints.push(p);
+                // 始点に戻ったら閉じる判定
                 if (hatchPoints.length > 2) {
                     const first = hatchPoints[0];
                     if (Math.hypot(p.x - first.x, p.y - first.y) < 15 && hatchPoints.length > 3) {
                         finishHatch();
                     }
                 }
+                redraw();
                 return;
             }
 
             startX = p.x; startY = p.y; drawing = true;
+
             if (currentTool === 'text') {
                 const txt = prompt("文字入力:");
                 if (txt) shapes.push({type:'text', x:startX, y:startY, text:txt, color:currentColor});
                 drawing = false;
+                redraw();
             }
         }
 
         function handleGlobalMouseUp(e) {
             if (!drawing || currentTool === 'hatch') return;
+            
             const p = getPos(e.clientX, e.clientY);
             let endX = p.x, endY = p.y;
             drawing = false;
 
             if (currentTool === 'multi') {
+                // 複数線はモーダルを開くため一時保存
                 tempMultiRect = {x1:startX, y1:startY, x2:endX, y2:endY, color:currentColor};
                 document.getElementById('modal-overlay').style.display = 'block';
                 document.getElementById('multi-modal').style.display = 'block';
@@ -148,6 +180,7 @@
                 const d = prompt("距離を入力:");
                 if (d) shapes.push({type:'dist', x1:startX, y1:startY, x2:endX, y2:endY, text:d+"m", color:'#ff0000'});
             } else {
+                // Shiftキー補正（確定時）
                 if (isShiftDown && currentTool !== 'rect') {
                     if (Math.abs(endX - startX) > Math.abs(endY - startY)) endY = startY; else endX = startX;
                 }
@@ -166,33 +199,12 @@
             redraw();
         }
 
-        function drawHatchPattern(context, points) {
-            context.save();
-            context.beginPath();
-            context.moveTo(points[0].x, points[0].y);
-            points.forEach(p => context.lineTo(p.x, p.y));
-            context.closePath();
-            context.clip();
-
-            context.strokeStyle = 'rgba(255, 0, 0, 0.4)';
-            context.lineWidth = 2;
-            for (let i = -canvas.width; i < canvas.width + canvas.height; i += 12) {
-                context.beginPath();
-                context.moveTo(i, 0);
-                context.lineTo(i + canvas.height, canvas.height);
-                context.stroke();
-            }
-            context.restore();
-            context.strokeStyle = 'red';
-            context.lineWidth = 1;
-            context.stroke();
-        }
-
         function redraw() {
             ctx.clearRect(0,0,canvas.width, canvas.height);
-            // 既存図形描画
+
+            // 1. 確定済み図形の描画
             shapes.forEach(s => {
-                ctx.strokeStyle = s.color || 'red'; ctx.fillStyle = s.color; ctx.lineWidth = 3;
+                ctx.strokeStyle = s.color || 'red'; ctx.fillStyle = s.color; ctx.lineWidth = LINE_WIDTH;
                 if(s.type==='rect') ctx.strokeRect(s.x1, s.y1, s.x2-s.x1, s.y2-s.y1);
                 else if(s.type==='hatch') drawHatchPattern(ctx, s.points);
                 else if(s.type==='multi'){
@@ -207,25 +219,77 @@
                 } else if(s.type==='line' || s.type==='dist'){
                     ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
                     if(s.type==='dist'){
-                        ctx.font = "bold 24px sans-serif";
+                        ctx.font = FONT_SIZE_S;
                         drawArrow(ctx, s.x1, s.y1, s.x2, s.y2); drawArrow(ctx, s.x2, s.y2, s.x1, s.y1);
                         const mx = (s.x1+s.x2)/2, my = (s.y1+s.y2)/2, tw = ctx.measureText(s.text).width;
                         ctx.fillStyle = "white"; ctx.fillRect(mx-tw/2-6, my-15, tw+12, 30);
                         ctx.fillStyle = s.color; ctx.textAlign="center"; ctx.fillText(s.text, mx, my+9);
                     }
-                } else if(s.type==='text'){ ctx.font="bold 32px sans-serif"; ctx.textAlign="left"; ctx.fillText(s.text, s.x, s.y); }
+                } else if(s.type==='text'){ ctx.font=FONT_SIZE_L; ctx.textAlign="left"; ctx.fillText(s.text, s.x, s.y); }
             });
 
-            // プレビュー描画
+            // 2. プレビュー描画（ドラッグ中・作成中）
             if (drawing) {
-                const mouse = getPos(window.lastMouseX || startX, window.lastMouseY || startY); // ※実際はmove中に座標更新が必要
-                // 簡易プレビュー
+                const p = getPos(lastMouseX, lastMouseY);
+                let curX = p.x, curY = p.y;
+
+                // 直線・距離・複数線の場合のShift補正
+                if (isShiftDown && currentTool !== 'rect' && currentTool !== 'multi') {
+                    if (Math.abs(curX - startX) > Math.abs(curY - startY)) curY = startY; else curX = startX;
+                }
+
+                ctx.strokeStyle = (currentTool==='dist'?'#ff0000':currentColor);
+                ctx.lineWidth = LINE_WIDTH;
+
+                if (currentTool === 'rect') {
+                    ctx.strokeRect(startX, startY, curX - startX, curY - startY);
+                } else if (currentTool === 'multi') {
+                    // 複数線は範囲指定中なので点線の四角を表示
+                    ctx.setLineDash([5, 5]);
+                    ctx.strokeRect(startX, startY, curX - startX, curY - startY);
+                    ctx.setLineDash([]);
+                } else if (currentTool === 'line' || currentTool === 'dist') {
+                    ctx.beginPath(); ctx.moveTo(startX, startY); ctx.lineTo(curX, curY); ctx.stroke();
+                    if (currentTool === 'dist') {
+                        drawArrow(ctx, startX, startY, curX, curY);
+                        drawArrow(ctx, curX, curY, startX, startY);
+                    }
+                }
             }
+
+            // 3. 斜線ツールのラバーバンド（次点へのガイド）描画
             if (hatchPoints.length > 0) {
-                ctx.beginPath(); ctx.strokeStyle = 'red'; ctx.moveTo(hatchPoints[0].x, hatchPoints[0].y);
-                hatchPoints.forEach(p => ctx.lineTo(p.x, p.y));
+                const p = getPos(lastMouseX, lastMouseY);
+                ctx.beginPath(); ctx.strokeStyle = 'red'; ctx.lineWidth = 1;
+                ctx.moveTo(hatchPoints[0].x, hatchPoints[0].y);
+                hatchPoints.forEach(pt => ctx.lineTo(pt.x, pt.y));
+                ctx.lineTo(p.x, p.y); // 現在のマウス位置へ線を伸ばす
                 ctx.stroke();
             }
+        }
+
+        function drawHatchPattern(context, points) {
+            context.save();
+            context.beginPath();
+            context.moveTo(points[0].x, points[0].y);
+            points.forEach(p => context.lineTo(p.x, p.y));
+            context.closePath();
+            context.clip();
+
+            context.strokeStyle = 'rgba(255, 0, 0, 0.4)';
+            context.lineWidth = 2;
+            // 斜線ハッチング
+            const max = Math.max(canvas.width, canvas.height);
+            for (let i = -max; i < max * 2; i += 12) {
+                context.beginPath();
+                context.moveTo(i, 0);
+                context.lineTo(i + max, max);
+                context.stroke();
+            }
+            context.restore();
+            context.strokeStyle = 'red';
+            context.lineWidth = 1; // 枠線は細く
+            context.stroke();
         }
 
         function drawArrow(c, x1, y1, x2, y2) {
@@ -238,11 +302,11 @@
         }
 
         function setColor(c) { currentColor = c; document.querySelectorAll('.color-btn').forEach(b => b.classList.toggle('active', b.style.backgroundColor.includes(c))); }
-        function setTool(t) { currentTool = t; hatchPoints = []; document.querySelectorAll('.toolbar button').forEach(b => b.classList.toggle('active', b.id === 'tool-'+t)); }
+        function setTool(t) { currentTool = t; hatchPoints = []; drawing = false; redraw(); document.querySelectorAll('.toolbar button').forEach(b => b.classList.toggle('active', b.id === 'tool-'+t)); if(t==='dist') setColor('#ff0000');}
         function closeModal() { document.getElementById('modal-overlay').style.display = 'none'; document.getElementById('multi-modal').style.display = 'none'; }
         function confirmMulti(d) { const c = parseInt(document.getElementById('multi-count').value); if(c>=2) shapes.push({type:'multi', ...tempMultiRect, count:c, dir:d}); closeModal(); redraw(); }
-        function undo() { shapes.pop(); redraw(); }
-        function clearCanvas() { if(confirm("消去？")) { shapes = []; redraw(); } }
+        function undo() { shapes.pop(); hatchPoints=[]; redraw(); }
+        function clearCanvas() { if(confirm("全消去しますか？")) { shapes = []; hatchPoints=[]; redraw(); } }
 
         async function generateFinalPDF() {
             try {
@@ -254,14 +318,20 @@
                 const png = await doc.embedPng(img);
                 const page = doc.getPage(0);
                 const { width, height } = page.getSize();
+                
                 // 指定された最新座標
-                page.drawImage(png, { x: width * 0.500, y: height * 0.271, width: width * 0.424, height: height * 0.552 });
+                page.drawImage(png, { 
+                    x: width * 0.500, 
+                    y: height * 0.271, 
+                    width: width * 0.423, 
+                    height: height * 0.555 
+                });
+                
                 const out = await doc.save();
-                const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([out])); link.download = "配置図.pdf"; link.click();
+                const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([out], {type: 'application/pdf'})); link.download = "保管場所所在図・配置図_完成品.pdf"; link.click();
             } catch (e) { alert(e); }
         }
 
-        window.addEventListener('mousemove', (e) => { window.lastMouseX = e.clientX; window.lastMouseY = e.clientY; });
         setTool('rect');
     </script>
 </body>
