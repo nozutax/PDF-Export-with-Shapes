@@ -2,77 +2,50 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>配置図作成ツール (拡大表示版)</title>
+    <title>配置図作成ツール (複数線機能付)</title>
     <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
     <style>
         body { font-family: 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; align-items: center; background: #f4f7f6; margin: 0; padding: 20px; }
-        
         .toolbar { background: #fff; padding: 15px; margin-bottom: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; border: 1px solid #ddd; }
         .group { display: flex; align-items: center; gap: 8px; border-right: 1px solid #eee; padding-right: 12px; margin-right: 5px; }
         .group:last-child { border-right: none; }
-
-        /* キャンバスサイズを1.5倍に拡大 (708px x 681px) */
-        #canvas-container { 
-            position: relative; 
-            width: 708px; 
-            height: 681px; 
-            border: 2px solid #333; 
-            background: white; 
-            cursor: crosshair; 
-            box-shadow: 0 0 20px rgba(0,0,0,0.1);
-        }
+        #canvas-container { position: relative; width: 708px; height: 681px; border: 2px solid #333; background: white; cursor: crosshair; box-shadow: 0 0 20px rgba(0,0,0,0.1); }
         canvas { position: absolute; top: 0; left: 0; width: 708px; height: 681px; }
-        
         button { padding: 10px 15px; cursor: pointer; border: 1px solid #ddd; background: #fff; border-radius: 6px; font-size: 14px; transition: 0.2s; }
         button:hover { background: #f9f9f9; border-color: #bbb; }
         button.active { background: #007bff; color: white; border-color: #0056b3; }
-        
         .color-btn { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; cursor: pointer; box-shadow: 0 0 4px rgba(0,0,0,0.2); }
         .color-btn.active { outline: 3px solid #007bff; }
-        
         .download-btn { background: #28a745 !important; color: white !important; font-weight: bold; border: none !important; padding: 10px 25px !important; }
-        .download-btn:hover { background: #218838 !important; }
-        
-        .hint { font-size: 13px; color: #666; margin-top: 20px; text-align: center; line-height: 1.6; max-width: 700px; }
-        kbd { background: #eee; border: 1px solid #ccc; padding: 2px 5px; border-radius: 3px; font-family: monospace; }
-        
         .size-label { font-size: 14px; color: #555; font-weight: bold; margin-bottom: 8px; }
     </style>
 </head>
 <body>
 
-    <h2 style="margin-top: 0; color: #333;">配置図・清書ツール (拡大表示版)</h2>
+    <h2 style="margin-top: 0; color: #333;">配置図・清書ツール</h2>
 
     <div class="toolbar">
         <div class="group">
             <button class="color-btn active" id="col-black" style="background: #000;" onclick="setColor('#000000')"></button>
             <button class="color-btn" id="col-red" style="background: #ff0000;" onclick="setColor('#ff0000')"></button>
         </div>
-
         <div class="group">
             <button onclick="setTool('rect')" id="tool-rect" class="active">長方形</button>
             <button onclick="setTool('line')" id="tool-line">直線</button>
             <button onclick="setTool('dist')" id="tool-dist" style="color:red; font-weight:bold;">距離(矢印)</button>
             <button onclick="setTool('text')" id="tool-text">文字</button>
+            <button onclick="setTool('multi')" id="tool-multi" style="background:#eefaff; border-color:#99ccff;">複数線</button>
         </div>
-
         <div class="group">
             <button onclick="undo()">1つ戻す</button>
             <button onclick="clearCanvas()" style="color:#d9534f;">全消去</button>
         </div>
-
         <button onclick="generateFinalPDF()" class="download-btn">完成PDFを保存</button>
     </div>
 
-    <div class="size-label">描画エリア (1.5倍拡大表示中)</div>
+    <div class="size-label">描画エリア (1.5倍表示)</div>
     <div id="canvas-container">
         <canvas id="draw-canvas" width="708" height="681"></canvas>
-    </div>
-
-    <div class="hint">
-        ・<kbd>Shift</kbd>キーで垂直・水平固定 / 10pxスナップ有効<br>
-        ・<strong>距離ツール</strong>：数値を入力すると「〇〇m」と自動表示されます。<br>
-        ・キャンバスを大きくしましたが、保存されるPDFの比率は規定サイズ(125x120mm)に調整されます。
     </div>
 
     <script>
@@ -81,13 +54,11 @@
 
         const drawCanvas = document.getElementById('draw-canvas');
         const drawCtx = drawCanvas.getContext('2d');
-        
         let currentTool = 'rect', currentColor = '#000000', drawing = false;
         let startX, startY, shapes = [], isShiftDown = false;
 
-        // 拡大に合わせ、キャンバス上での文字サイズと線の太さを調整
-        // (以前の21px * 1.5倍 ≒ 32px)
-        const FONT_SIZE = "bold 32px sans-serif";
+        const FONT_SIZE_L = "bold 32px sans-serif"; // 一般文字用
+        const FONT_SIZE_S = "bold 29px sans-serif"; // 距離表示用 (2pt相当縮小)
         const LINE_WIDTH = 3; 
 
         window.addEventListener('keydown', (e) => { if(e.key === 'Shift') isShiftDown = true; });
@@ -110,7 +81,6 @@
             const rect = drawCanvas.getBoundingClientRect();
             let x = e.clientX - rect.left;
             let y = e.clientY - rect.top;
-            // 拡大に合わせてスナップも微調整可だが、10pxのままが使いやすいため維持
             return { x: Math.round(x/10)*10, y: Math.round(y/10)*10 };
         }
 
@@ -126,15 +96,19 @@
         drawCanvas.addEventListener('mousemove', (e) => {
             if(!drawing) return;
             const p = getPos(e); let curX = p.x, curY = p.y;
-            if(isShiftDown){
+            if(isShiftDown && currentTool !== 'multi' && currentTool !== 'rect'){
                 if(Math.abs(curX-startX) > Math.abs(curY-startY)) curY=startY;
                 else curX=startX;
             }
             redraw();
             drawCtx.strokeStyle = (currentTool==='dist'?'#ff0000':currentColor);
             drawCtx.lineWidth = LINE_WIDTH;
-            if(currentTool==='rect') drawCtx.strokeRect(startX, startY, curX-startX, curY-startY);
-            else if(currentTool==='line' || currentTool==='dist'){
+            
+            if(currentTool === 'rect' || currentTool === 'multi'){
+                drawCtx.setLineDash(currentTool === 'multi' ? [5, 5] : []); // 複数線範囲指定時は点線
+                drawCtx.strokeRect(startX, startY, curX-startX, curY-startY);
+                drawCtx.setLineDash([]);
+            } else if(currentTool==='line' || currentTool==='dist'){
                 drawCtx.beginPath(); drawCtx.moveTo(startX, startY); drawCtx.lineTo(curX, curY); drawCtx.stroke();
                 if(currentTool==='dist'){ drawArrow(drawCtx, startX, startY, curX, curY); drawArrow(drawCtx, curX, curY, startX, startY); }
             }
@@ -143,14 +117,24 @@
         drawCanvas.addEventListener('mouseup', (e) => {
             if(!drawing) return;
             const p = getPos(e); let endX = p.x, endY = p.y;
-            if(isShiftDown){
-                if(Math.abs(endX-startX) > Math.abs(endY-startY)) endY=startY;
-                else endX=startX;
-            }
-            if(currentTool==='dist'){
+
+            if(currentTool === 'multi'){
+                const count = parseInt(prompt("範囲内に引く線の本数を入力してください（例: 3）", "3"));
+                if(!isNaN(count) && count > 0){
+                    const dir = prompt("方向を入力してください (縦: V, 横: H)", "V").toUpperCase();
+                    if(dir === 'V' || dir === 'H'){
+                        shapes.push({type:'multi', x1:startX, y1:startY, x2:endX, y2:endY, count:count, dir:dir, color:currentColor});
+                    }
+                }
+            } else if(currentTool === 'dist'){
                 const d = prompt("距離を入力してください:");
                 if(d) shapes.push({type:'dist', x1:startX, y1:startY, x2:endX, y2:endY, text:d+"m", color:'#ff0000'});
+            } else if(currentTool === 'text'){
+                // すでにmousedownで処理済み
             } else {
+                if(isShiftDown){
+                    if(Math.abs(endX-startX) > Math.abs(endY-startY)) endY=startY; else endX=startX;
+                }
                 shapes.push({type:currentTool, x1:startX, y1:startY, x2:endX, y2:endY, color:currentColor});
             }
             drawing = false; redraw();
@@ -159,27 +143,47 @@
         function redraw() {
             drawCtx.clearRect(0,0,drawCanvas.width, drawCanvas.height);
             shapes.forEach(s => {
-                drawCtx.strokeStyle = s.color; drawCtx.fillStyle = s.color; 
-                drawCtx.lineWidth = LINE_WIDTH; 
-                drawCtx.font = FONT_SIZE;
+                drawCtx.strokeStyle = s.color; drawCtx.fillStyle = s.color; drawCtx.lineWidth = LINE_WIDTH;
 
-                if(s.type==='rect') drawCtx.strokeRect(s.x1, s.y1, s.x2-s.x1, s.y2-s.y1);
-                else if(s.type==='line' || s.type==='dist'){
+                if(s.type==='rect'){
+                    drawCtx.strokeRect(s.x1, s.y1, s.x2-s.x1, s.y2-s.y1);
+                } else if(s.type==='multi'){
+                    const dx = s.x2 - s.x1; const dy = s.y2 - s.y1;
+                    // 外枠（任意ですが、領域が見えなくなるので描画）
+                    drawCtx.strokeRect(s.x1, s.y1, dx, dy);
+                    // 内部の等間隔線
+                    for(let i=1; i <= s.count; i++){
+                        drawCtx.beginPath();
+                        if(s.dir === 'V'){
+                            let px = s.x1 + (dx * i) / (s.count + 1);
+                            drawCtx.moveTo(px, s.y1); drawCtx.lineTo(px, s.y2);
+                        } else {
+                            let py = s.y1 + (dy * i) / (s.count + 1);
+                            drawCtx.moveTo(s.x1, py); drawCtx.lineTo(s.x2, py);
+                        }
+                        drawCtx.stroke();
+                    }
+                } else if(s.type==='line' || s.type==='dist'){
                     drawCtx.beginPath(); drawCtx.moveTo(s.x1, s.y1); drawCtx.lineTo(s.x2, s.y2); drawCtx.stroke();
                     if(s.type==='dist'){
+                        drawCtx.font = FONT_SIZE_S; // 小さいフォント
                         drawArrow(drawCtx, s.x1, s.y1, s.x2, s.y2); drawArrow(drawCtx, s.x2, s.y2, s.x1, s.y1);
                         const mx = (s.x1+s.x2)/2, my = (s.y1+s.y2)/2;
                         const tw = drawCtx.measureText(s.text).width;
-                        // 背景クリアエリアもフォントに合わせて拡大
-                        drawCtx.clearRect(mx - (tw/2 + 8), my - 20, tw + 16, 40);
-                        drawCtx.textAlign="center"; drawCtx.fillText(s.text, mx, my + 11);
+                        drawCtx.fillStyle = "white";
+                        drawCtx.fillRect(mx - (tw/2 + 8), my - 18, tw + 16, 36);
+                        drawCtx.fillStyle = s.color;
+                        drawCtx.textAlign="center"; drawCtx.fillText(s.text, mx, my + 10);
                     }
-                } else if(s.type==='text'){ drawCtx.textAlign="left"; drawCtx.fillText(s.text, s.x, s.y); }
+                } else if(s.type==='text'){
+                    drawCtx.font = FONT_SIZE_L; // 通常フォント
+                    drawCtx.textAlign="left"; drawCtx.fillText(s.text, s.x, s.y); 
+                }
             });
         }
 
         function drawArrow(ctx, x1, y1, x2, y2) {
-            const angle = Math.atan2(y2-y1, x2-x1), len = 18; // 矢印のサイズも少し拡大
+            const angle = Math.atan2(y2-y1, x2-x1), len = 18;
             ctx.beginPath(); ctx.moveTo(x2, y2);
             ctx.lineTo(x2-len*Math.cos(angle-Math.PI/6), y2-len*Math.sin(angle-Math.PI/6));
             ctx.moveTo(x2, y2);
@@ -188,35 +192,21 @@
         }
 
         function undo() { shapes.pop(); redraw(); }
-        function clearCanvas() { if(confirm("描画をすべて消去しますか？")) { shapes = []; redraw(); } }
+        function clearCanvas() { if(confirm("消去しますか？")) { shapes = []; redraw(); } }
 
         async function generateFinalPDF() {
             try {
-                const templateBytes = await fetch(TEMPLATE_URL).then(res => {
-                    if(!res.ok) throw new Error("テンプレートPDFの取得に失敗しました。");
-                    return res.arrayBuffer();
-                });
-
+                const templateBytes = await fetch(TEMPLATE_URL).then(res => res.arrayBuffer());
                 const exportCanvas = document.createElement('canvas');
                 exportCanvas.width = drawCanvas.width; exportCanvas.height = drawCanvas.height;
                 const exCtx = exportCanvas.getContext('2d');
-                exCtx.fillStyle = "white"; exCtx.fillRect(0,0,exportCanvas.width, exportCanvas.height);
                 exCtx.drawImage(drawCanvas, 0, 0);
                 const pngImageBytes = await fetch(exportCanvas.toDataURL('image/png')).then(res => res.arrayBuffer());
-
                 const pdfDoc = await PDFDocument.load(templateBytes);
                 const pngImage = await pdfDoc.embedPng(pngImageBytes);
                 const page = pdfDoc.getPage(0);
                 const { width, height } = page.getSize();
-
-                // 配置図記載欄の合成位置 (比率は維持)
-                const targetX = width * 0.500; 
-                const targetY = height * 0.270; 
-                const targetW = width * 0.425; 
-                const targetH = height * 0.55; 
-
-                page.drawImage(pngImage, { x: targetX, y: targetY, width: targetW, height: targetH });
-
+                page.drawImage(pngImage, { x: width * 0.500, y: height * 0.270, width: width * 0.425, height: height * 0.55 });
                 const pdfBytes = await pdfDoc.save();
                 const blob = new Blob([pdfBytes], { type: "application/pdf" });
                 const link = document.createElement('a');
