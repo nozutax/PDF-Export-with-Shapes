@@ -2,8 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>配置図作成ツール (125x120mm)</title>
-    <!-- ライブラリ読み込み -->
+    <title>配置図作成ツール (拡大表示版)</title>
     <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
     <style>
         body { font-family: 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; align-items: center; background: #f4f7f6; margin: 0; padding: 20px; }
@@ -12,17 +11,17 @@
         .group { display: flex; align-items: center; gap: 8px; border-right: 1px solid #eee; padding-right: 12px; margin-right: 5px; }
         .group:last-child { border-right: none; }
 
-        /* 125mm x 120mm のキャンバス設定 (96dpi換算で約472px x 454px) */
+        /* キャンバスサイズを1.5倍に拡大 (708px x 681px) */
         #canvas-container { 
             position: relative; 
-            width: 472px; 
-            height: 454px; 
+            width: 708px; 
+            height: 681px; 
             border: 2px solid #333; 
             background: white; 
             cursor: crosshair; 
             box-shadow: 0 0 20px rgba(0,0,0,0.1);
         }
-        canvas { position: absolute; top: 0; left: 0; width: 472px; height: 454px; }
+        canvas { position: absolute; top: 0; left: 0; width: 708px; height: 681px; }
         
         button { padding: 10px 15px; cursor: pointer; border: 1px solid #ddd; background: #fff; border-radius: 6px; font-size: 14px; transition: 0.2s; }
         button:hover { background: #f9f9f9; border-color: #bbb; }
@@ -34,15 +33,15 @@
         .download-btn { background: #28a745 !important; color: white !important; font-weight: bold; border: none !important; padding: 10px 25px !important; }
         .download-btn:hover { background: #218838 !important; }
         
-        .hint { font-size: 13px; color: #666; margin-top: 20px; text-align: center; line-height: 1.6; max-width: 600px; }
+        .hint { font-size: 13px; color: #666; margin-top: 20px; text-align: center; line-height: 1.6; max-width: 700px; }
         kbd { background: #eee; border: 1px solid #ccc; padding: 2px 5px; border-radius: 3px; font-family: monospace; }
         
-        .size-label { font-size: 12px; color: #999; margin-bottom: 5px; }
+        .size-label { font-size: 14px; color: #555; font-weight: bold; margin-bottom: 8px; }
     </style>
 </head>
 <body>
 
-    <h2 style="margin-top: 0; color: #333;">配置図・清書ツール</h2>
+    <h2 style="margin-top: 0; color: #333;">配置図・清書ツール (拡大表示版)</h2>
 
     <div class="toolbar">
         <div class="group">
@@ -65,16 +64,15 @@
         <button onclick="generateFinalPDF()" class="download-btn">完成PDFを保存</button>
     </div>
 
-    <div class="size-label">描画エリア: 125mm × 120mm (配置図記載欄サイズ)</div>
+    <div class="size-label">描画エリア (1.5倍拡大表示中)</div>
     <div id="canvas-container">
-        <canvas id="draw-canvas" width="472" height="454"></canvas>
+        <canvas id="draw-canvas" width="708" height="681"></canvas>
     </div>
 
     <div class="hint">
-        <strong>操作方法:</strong><br>
-        ・<kbd>Shift</kbd>キーを押しながら描画：垂直・水平に固定<br>
-        ・グリッドスナップ：10px単位で自動吸着します<br>
-        ・<strong>距離ツール</strong>：矢印を引くと入力画面が出ます。「15」と入れると「15m」と表示されます。
+        ・<kbd>Shift</kbd>キーで垂直・水平固定 / 10pxスナップ有効<br>
+        ・<strong>距離ツール</strong>：数値を入力すると「〇〇m」と自動表示されます。<br>
+        ・キャンバスを大きくしましたが、保存されるPDFの比率は規定サイズ(125x120mm)に調整されます。
     </div>
 
     <script>
@@ -87,8 +85,10 @@
         let currentTool = 'rect', currentColor = '#000000', drawing = false;
         let startX, startY, shapes = [], isShiftDown = false;
 
-        // 文字サイズ設定 (21px)
-        const FONT_SIZE = "bold 21px sans-serif";
+        // 拡大に合わせ、キャンバス上での文字サイズと線の太さを調整
+        // (以前の21px * 1.5倍 ≒ 32px)
+        const FONT_SIZE = "bold 32px sans-serif";
+        const LINE_WIDTH = 3; 
 
         window.addEventListener('keydown', (e) => { if(e.key === 'Shift') isShiftDown = true; });
         window.addEventListener('keyup', (e) => { if(e.key === 'Shift') isShiftDown = false; });
@@ -110,7 +110,7 @@
             const rect = drawCanvas.getBoundingClientRect();
             let x = e.clientX - rect.left;
             let y = e.clientY - rect.top;
-            // 10pxスナップ
+            // 拡大に合わせてスナップも微調整可だが、10pxのままが使いやすいため維持
             return { x: Math.round(x/10)*10, y: Math.round(y/10)*10 };
         }
 
@@ -132,7 +132,7 @@
             }
             redraw();
             drawCtx.strokeStyle = (currentTool==='dist'?'#ff0000':currentColor);
-            drawCtx.lineWidth = 2;
+            drawCtx.lineWidth = LINE_WIDTH;
             if(currentTool==='rect') drawCtx.strokeRect(startX, startY, curX-startX, curY-startY);
             else if(currentTool==='line' || currentTool==='dist'){
                 drawCtx.beginPath(); drawCtx.moveTo(startX, startY); drawCtx.lineTo(curX, curY); drawCtx.stroke();
@@ -159,7 +159,8 @@
         function redraw() {
             drawCtx.clearRect(0,0,drawCanvas.width, drawCanvas.height);
             shapes.forEach(s => {
-                drawCtx.strokeStyle = s.color; drawCtx.fillStyle = s.color; drawCtx.lineWidth = 2; 
+                drawCtx.strokeStyle = s.color; drawCtx.fillStyle = s.color; 
+                drawCtx.lineWidth = LINE_WIDTH; 
                 drawCtx.font = FONT_SIZE;
 
                 if(s.type==='rect') drawCtx.strokeRect(s.x1, s.y1, s.x2-s.x1, s.y2-s.y1);
@@ -169,15 +170,16 @@
                         drawArrow(drawCtx, s.x1, s.y1, s.x2, s.y2); drawArrow(drawCtx, s.x2, s.y2, s.x1, s.y1);
                         const mx = (s.x1+s.x2)/2, my = (s.y1+s.y2)/2;
                         const tw = drawCtx.measureText(s.text).width;
-                        drawCtx.clearRect(mx - (tw/2 + 5), my - 13, tw + 10, 26);
-                        drawCtx.textAlign="center"; drawCtx.fillText(s.text, mx, my + 8);
+                        // 背景クリアエリアもフォントに合わせて拡大
+                        drawCtx.clearRect(mx - (tw/2 + 8), my - 20, tw + 16, 40);
+                        drawCtx.textAlign="center"; drawCtx.fillText(s.text, mx, my + 11);
                     }
                 } else if(s.type==='text'){ drawCtx.textAlign="left"; drawCtx.fillText(s.text, s.x, s.y); }
             });
         }
 
         function drawArrow(ctx, x1, y1, x2, y2) {
-            const angle = Math.atan2(y2-y1, x2-x1), len = 12;
+            const angle = Math.atan2(y2-y1, x2-x1), len = 18; // 矢印のサイズも少し拡大
             ctx.beginPath(); ctx.moveTo(x2, y2);
             ctx.lineTo(x2-len*Math.cos(angle-Math.PI/6), y2-len*Math.sin(angle-Math.PI/6));
             ctx.moveTo(x2, y2);
@@ -195,7 +197,6 @@
                     return res.arrayBuffer();
                 });
 
-                // キャンバスをPNG化
                 const exportCanvas = document.createElement('canvas');
                 exportCanvas.width = drawCanvas.width; exportCanvas.height = drawCanvas.height;
                 const exCtx = exportCanvas.getContext('2d');
@@ -208,7 +209,7 @@
                 const page = pdfDoc.getPage(0);
                 const { width, height } = page.getSize();
 
-                // 配置図記載欄（右側の枠）の位置へ正確に配置
+                // 配置図記載欄の合成位置 (比率は維持)
                 const targetX = width * 0.505; 
                 const targetY = height * 0.275; 
                 const targetW = width * 0.425; 
