@@ -8,10 +8,11 @@
     <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
     <style>
         body { font-family: 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; align-items: center; background: #f4f7f6; margin: 0; padding: 20px; }
-        .toolbar { background: #fff; padding: 15px; margin-bottom: 15px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; max-width: 1100px; border: 1px solid #ddd; }
+        .toolbar { background: #fff; padding: 15px; margin-bottom: 15px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; width: fit-content; border: 1px solid #ddd; }
         .group { display: flex; align-items: center; gap: 8px; border-right: 1px solid #eee; padding-right: 12px; margin-right: 5px; }
         .group:last-child { border-right: none; }
-        #canvas-container { position: relative; border: 2px solid #ccc; background: white; overflow: auto; cursor: crosshair; box-shadow: 0 0 20px rgba(0,0,0,0.1); }
+        /* スクロール制限を解除 */
+        #canvas-container { position: relative; border: 2px solid #ccc; background: white; cursor: crosshair; box-shadow: 0 0 20px rgba(0,0,0,0.1); margin-bottom: 50px; }
         canvas { position: absolute; top: 0; left: 0; }
         #bg-canvas { z-index: 1; }
         #draw-canvas { z-index: 2; }
@@ -20,9 +21,9 @@
         button.active { background: #007bff; color: white; border-color: #0056b3; }
         .color-btn { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; cursor: pointer; box-shadow: 0 0 4px rgba(0,0,0,0.2); }
         .color-btn.active { outline: 3px solid #007bff; }
-        .download-btn { background: #28a745 !important; color: white !important; font-weight: bold; border: none !important; padding: 10px 25px !important; margin-left: auto; }
+        .download-btn { background: #28a745 !important; color: white !important; font-weight: bold; border: none !important; padding: 10px 25px !important; }
         .download-btn:hover { background: #218838 !important; }
-        .hint { font-size: 13px; color: #666; margin-top: 15px; text-align: center; line-height: 1.6; }
+        .hint { font-size: 13px; color: #666; margin-top: 15px; text-align: center; line-height: 1.6; max-width: 800px; }
         kbd { background: #eee; border: 1px solid #ccc; padding: 2px 5px; border-radius: 3px; font-family: monospace; }
     </style>
 </head>
@@ -54,10 +55,11 @@
             <button onclick="clearCanvas()" style="color:#d9534f;">全消去</button>
         </div>
 
-        <button onclick="generateFinalPDF()" class="download-btn">完成PDFをダウンロード</button>
+        <button onclick="generateFinalPDF()" class="download-btn">完成PDFを保存</button>
     </div>
 
     <div id="canvas-container">
+        <!-- 初期サイズ 読み込み時に自動更新されます -->
         <canvas id="bg-canvas" width="800" height="500"></canvas>
         <canvas id="draw-canvas" width="800" height="500"></canvas>
     </div>
@@ -84,11 +86,12 @@
         let currentTool = 'rect', currentColor = '#000000', drawing = false;
         let startX, startY, shapes = [], bgImage = null, bgRotation = 0, isShiftDown = false;
 
-        // キー操作
+        // 文字サイズ設定 (以前の18pxから21pxへ変更)
+        const FONT_SIZE = "bold 21px sans-serif";
+
         window.addEventListener('keydown', (e) => { if(e.key === 'Shift') isShiftDown = true; });
         window.addEventListener('keyup', (e) => { if(e.key === 'Shift') isShiftDown = false; });
 
-        // 下書き読み込み
         document.getElementById('fileLoader').addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (!file) return;
@@ -115,7 +118,7 @@
             if (bgRotation % 180 === 0) { bgCanvas.width = drawCanvas.width = w; bgCanvas.height = drawCanvas.height = h; }
             else { bgCanvas.width = drawCanvas.width = h; bgCanvas.height = drawCanvas.height = w; }
             container.style.width = bgCanvas.width + "px";
-            container.style.height = (bgCanvas.height > 600 ? 600 : bgCanvas.height) + "px"; // スクロール対応
+            container.style.height = bgCanvas.height + "px"; 
             renderBg(); redraw();
         }
 
@@ -179,14 +182,18 @@
         function redraw() {
             drawCtx.clearRect(0,0,drawCanvas.width, drawCanvas.height);
             shapes.forEach(s => {
-                drawCtx.strokeStyle = s.color; drawCtx.fillStyle = s.color; drawCtx.lineWidth = 2; drawCtx.font = "bold 18px sans-serif";
+                drawCtx.strokeStyle = s.color; drawCtx.fillStyle = s.color; drawCtx.lineWidth = 2; 
+                drawCtx.font = FONT_SIZE; // 更新された文字サイズを適用
+
                 if(s.type==='rect') drawCtx.strokeRect(s.x1, s.y1, s.x2-s.x1, s.y2-s.y1);
                 else if(s.type==='line' || s.type==='dist'){
                     drawCtx.beginPath(); drawCtx.moveTo(s.x1, s.y1); drawCtx.lineTo(s.x2, s.y2); drawCtx.stroke();
                     if(s.type==='dist'){
                         drawArrow(drawCtx, s.x1, s.y1, s.x2, s.y2); drawArrow(drawCtx, s.x2, s.y2, s.x1, s.y1);
                         const mx = (s.x1+s.x2)/2, my = (s.y1+s.y2)/2;
-                        drawCtx.clearRect(mx-25, my-12, 50, 24); drawCtx.textAlign="center"; drawCtx.fillText(s.text, mx, my+7);
+                        const tw = drawCtx.measureText(s.text).width;
+                        drawCtx.clearRect(mx - (tw/2 + 5), my - 13, tw + 10, 26); // 文字の背景をクリア
+                        drawCtx.textAlign="center"; drawCtx.fillText(s.text, mx, my + 8);
                     }
                 } else if(s.type==='text'){ drawCtx.textAlign="left"; drawCtx.fillText(s.text, s.x, s.y); }
             });
@@ -204,53 +211,34 @@
         function undo() { shapes.pop(); redraw(); }
         function clearCanvas() { if(confirm("描画をすべて消去しますか？")) { shapes = []; redraw(); } }
 
-        // --- PDF合成とダウンロード ---
         async function generateFinalPDF() {
             try {
-                // 1. テンプレートPDFの取得
                 const templateBytes = await fetch(TEMPLATE_URL).then(res => {
                     if(!res.ok) throw new Error("テンプレートPDFの取得に失敗しました。");
                     return res.arrayBuffer();
                 });
-
-                // 2. 清書内容を画像化
                 const exportCanvas = document.createElement('canvas');
                 exportCanvas.width = drawCanvas.width; exportCanvas.height = drawCanvas.height;
                 const exCtx = exportCanvas.getContext('2d');
                 exCtx.fillStyle = "white"; exCtx.fillRect(0,0,exportCanvas.width, exportCanvas.height);
                 exCtx.drawImage(drawCanvas, 0, 0);
                 const pngImageBytes = await fetch(exportCanvas.toDataURL('image/png')).then(res => res.arrayBuffer());
-
-                // 3. PDF合成
                 const pdfDoc = await PDFDocument.load(templateBytes);
                 const pngImage = await pdfDoc.embedPng(pngImageBytes);
                 const page = pdfDoc.getPage(0);
                 const { width, height } = page.getSize();
-
-                // 配置図記載欄（右側の枠）への座標計算
-                // PDF-libの座標系は左下が(0,0)
                 const targetX = width * 0.505; 
                 const targetY = height * 0.275; 
                 const targetW = width * 0.425; 
                 const targetH = height * 0.55; 
-
-                page.drawImage(pngImage, {
-                    x: targetX,
-                    y: targetY,
-                    width: targetW,
-                    height: targetH,
-                });
-
+                page.drawImage(pngImage, { x: targetX, y: targetY, width: targetW, height: targetH });
                 const pdfBytes = await pdfDoc.save();
                 const blob = new Blob([pdfBytes], { type: "application/pdf" });
                 const link = document.createElement('a');
                 link.href = URL.createObjectURL(blob);
-                link.download = "保管場所所在図・配置図_作成済み.pdf";
+                link.download = "保管場所所在図・配置図_完成品.pdf";
                 link.click();
-            } catch (err) {
-                alert("エラーが発生しました: " + err.message);
-                console.error(err);
-            }
+            } catch (err) { alert("エラー: " + err.message); }
         }
     </script>
 </body>
